@@ -1,0 +1,410 @@
+ 项目开发文档：AI智能知识库助手
+1. 项目概述
+1.1 项目名称
+AI-Powered Personal Knowledge Base (个人智能知识库助手)
+
+1.2 项目目标
+开发一个端到端的AI全栈应用，支持用户上传多种格式文档（PDF、图片、音频），通过RAG（检索增强生成）技术实现智能问答和内容摘要。
+
+1.3 核心功能
+用户上传PDF/图片/音频文件
+
+后台自动解析并向量化存储
+
+基于文档内容的智能问答（带流式输出）
+
+跨文档摘要生成
+
+文件管理（列表/删除）
+
+2. 技术栈
+前端
+框架: Next.js 14 (App Router)
+
+样式: Tailwind CSS + shadcn/ui
+
+状态管理: Zustand (轻量级)
+
+HTTP客户端: Axios
+
+后端 (Python)
+Web框架: FastAPI (异步支持)
+
+ORM: SQLAlchemy 2.0 + Alembic (数据库迁移)
+
+数据库:
+
+PostgreSQL (存储用户/文件元数据)
+
+ChromaDB (向量存储，本地持久化)
+
+AI/ML库:
+
+LangChain (RAG流程编排)
+
+OpenAI SDK / 智谱SDK (LLM调用)
+
+Whisper (音频转文字)
+
+PyPDF2 / pdfplumber (PDF解析)
+
+Pillow (图片预处理)
+
+异步任务: Celery + Redis (大文件处理)
+
+文件存储: 本地文件系统 (开发环境) / MinIO (生产)
+
+部署
+Docker + Docker Compose
+
+Nginx (反向代理)
+
+3.系统架构设计
+┌─────────────────────────────────────────────────────────────┐
+│                         前端 (Next.js)                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │ 上传组件  │  │ 聊天界面  │  │ 文件列表  │  │ 状态管理  │  │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
+└────────────────────────┬────────────────────────────────────┘
+                         │ HTTP/SSE
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   后端 API (FastAPI)                        │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  路由层: /api/upload, /api/chat, /api/files       │   │
+│  └─────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  业务逻辑层: 文件处理 / RAG链 / 摘要生成           │   │
+│  └─────────────────────────────────────────────────────┘   │
+└────────────┬──────────────────────────────┬────────────────┘
+             │                              │
+             ▼                              ▼
+┌─────────────────────────┐   ┌─────────────────────────────┐
+│   PostgreSQL             │   │   ChromaDB (向量库)         │
+│   (users, files, chunks) │   │   (embeddings + metadata)   │
+└─────────────────────────┘   └─────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Celery Worker (异步任务)                       │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  - PDF解析 + 切片 + 向量化                          │   │
+│  │  - 音频转文字 (Whisper)                            │   │
+│  │  - 图片描述生成 (GPT-4V)                          │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+4. 数据库设计
+4.1 PostgreSQL 表结构
+sql
+-- 用户表
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 文件表
+CREATE TABLE files (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    filename VARCHAR(255) NOT NULL,
+    file_type VARCHAR(50), -- pdf, image, audio, text
+    file_path VARCHAR(500), -- 本地存储路径
+    file_size BIGINT,
+    status VARCHAR(20) DEFAULT 'pending', -- pending, processing, completed, failed
+    chunk_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 聊天记录表 (可选)
+CREATE TABLE conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    answer TEXT,
+    file_ids UUID[], -- 引用的文件ID列表
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+4.2 ChromaDB Collection 设计
+python
+# Collection名称: file_chunks
+# 每个chunk的metadata包含:
+{
+    "file_id": "uuid",        # 关联到PostgreSQL的files表
+    "user_id": "uuid",
+    "chunk_index": 0,          # 切片序号
+    "source_type": "pdf",      # pdf/image/audio/text
+    "filename": "example.pdf"
+}
+5. API接口设计
+5.1 认证接口
+方法	路径	描述	请求体
+POST	/api/auth/register	用户注册	{username, email, password}
+POST	/api/auth/login	用户登录	{username, password} → 返回JWT token
+5.2 文件管理接口
+方法	路径	描述	权限
+POST	/api/files/upload	上传文件	JWT
+GET	/api/files	获取用户文件列表	JWT
+DELETE	/api/files/{file_id}	删除文件 (同时删除向量)	JWT
+GET	/api/files/{file_id}/status	查询处理状态	JWT
+上传接口细节:
+
+http
+POST /api/files/upload
+Content-Type: multipart/form-data
+Authorization: Bearer <token>
+
+参数:
+- file: <二进制文件>
+- file_type: "pdf" | "image" | "audio" | "text"
+
+响应 (202 Accepted):
+{
+    "file_id": "uuid",
+    "status": "processing",
+    "message": "文件已上传，后台处理中..."
+}
+5.3 对话接口
+方法	路径	描述	权限
+POST	/api/chat/query	普通问答 (非流式)	JWT
+GET	/api/chat/stream	流式问答 (SSE)	JWT
+流式接口细节:
+
+http
+GET /api/chat/stream?question=总结这份PDF说了什么&file_ids=uuid1,uuid2
+Authorization: Bearer <token>
+
+响应 (text/event-stream):
+data: {"type": "start", "chunk": ""}
+data: {"type": "content", "chunk": "这"}
+data: {"type": "content", "chunk": "份"}
+data: {"type": "content", "chunk": "文"}
+... 
+data: {"type": "end", "sources": ["file1.pdf", "file2.pdf"]}
+5.4 摘要接口
+方法	路径	描述	权限
+POST	/api/summarize	生成指定文件的摘要	JWT
+6. 核心业务逻辑 (分模块实现)
+6.1 文件处理流程 (异步任务)
+python
+# tasks/file_processor.py
+
+@celery.task
+def process_file(file_id: str):
+    """
+    1. 根据file_id从数据库读取文件信息
+    2. 根据file_type调用不同的解析器:
+       - PDF: pdf_parser.extract_text()
+       - 图片: image_analyzer.generate_description() (调用多模态LLM)
+       - 音频: audio_transcriber.transcribe() (Whisper)
+    3. 文本切片 (TextSplitter, chunk_size=500, overlap=50)
+    4. 生成向量 (Embedding模型)
+    5. 存入ChromaDB
+    6. 更新数据库状态为 'completed'
+    """
+    pass
+6.2 RAG问答流程
+python
+# services/rag_service.py
+
+def rag_query(question: str, file_ids: List[str], user_id: str):
+    """
+    1. 根据file_ids从ChromaDB检索相关chunks (top_k=5)
+    2. 构建Prompt:
+       f"""
+       基于以下文档片段回答问题:
+       {context}
+       
+       问题: {question}
+       回答:
+       """
+    3. 调用LLM生成回答
+    4. 返回回答 + 引用来源
+    """
+    pass
+6.3 流式输出实现
+python
+# api/chat.py
+
+@router.get("/stream")
+async def stream_chat(
+    question: str,
+    file_ids: List[str] = Query(...),
+    current_user: User = Depends(get_current_user)
+):
+    async def generate():
+        # 1. 检索上下文
+        context = retrieve_context(question, file_ids)
+        
+        # 2. 流式调用LLM
+        async for chunk in llm.astream(generate_prompt(question, context)):
+            yield f"data: {json.dumps({'type': 'content', 'chunk': chunk})}\n\n"
+        
+        # 3. 结束标记
+        yield f"data: {json.dumps({'type': 'end'})}\n\n"
+    
+    return StreamingResponse(generate(), media_type="text/event-stream")
+7. 环境配置
+7.1 环境变量 (.env)
+bash
+# 数据库
+DATABASE_URL=postgresql://user:password@localhost:5432/knowledge_db
+
+# Redis (Celery broker)
+REDIS_URL=redis://localhost:6379/0
+
+# LLM API
+OPENAI_API_KEY=sk-xxx
+# 或
+ZHIPU_API_KEY=xxx
+
+# 向量数据库
+CHROMA_PERSIST_DIR=./chroma_db
+
+# 文件存储
+UPLOAD_DIR=./uploads
+MAX_FILE_SIZE=104857600  # 100MB
+
+# JWT
+SECRET_KEY=your-secret-key
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+7.2 项目结构
+text
+knowledge-base-backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                 # FastAPI应用入口
+│   ├── config.py               # 配置管理
+│   ├── database.py             # 数据库连接
+│   ├── models/                 # SQLAlchemy模型
+│   │   ├── user.py
+│   │   └── file.py
+│   ├── schemas/                # Pydantic模型
+│   │   ├── auth.py
+│   │   ├── file.py
+│   │   └── chat.py
+│   ├── api/                    # 路由
+│   │   ├── __init__.py
+│   │   ├── auth.py
+│   │   ├── files.py
+│   │   └── chat.py
+│   ├── services/               # 业务逻辑
+│   │   ├── auth_service.py
+│   │   ├── file_service.py
+│   │   ├── rag_service.py
+│   │   └── embedding_service.py
+│   ├── parsers/                # 文件解析器
+│   │   ├── pdf_parser.py
+│   │   ├── image_parser.py
+│   │   └── audio_parser.py
+│   ├── tasks/                  # Celery任务
+│   │   ├── __init__.py
+│   │   └── file_processor.py
+│   └── utils/                  # 工具函数
+│       ├── auth.py             # JWT处理
+│       └── file_utils.py
+├── celery_worker.py            # Celery启动文件
+├── requirements.txt
+├── docker-compose.yml
+├── Dockerfile
+└── .env.example
+8. 开发排期 (4周冲刺)
+周次	任务	交付物
+第1周	环境搭建 + 基础CRUD	Docker-compose跑通，用户注册/登录API，文件上传下载
+第2周	AI能力集成	PDF解析 + ChromaDB存入 + 基础RAG问答 (非流式)
+第3周	前端开发 + 流式输出	Next.js界面 + SSE流式对话 + 文件管理页面
+第4周	多模态扩展 + 部署	音频转文字、图片理解、Docker部署上线
+9. 技术难点与解决方案
+难点	解决方案	优先级
+大文件上传超时	前端分片上传 + 后端异步任务 (Celery)	高
+向量检索性能	ChromaDB索引优化 (默认已支持)	中
+长文档切片策略	语义切片 (SemanticChunker) + 重叠窗口	高
+流式输出稳定性	FastAPI StreamingResponse + 心跳机制	高
+多模态统一检索	图片/音频 → 文本描述 → 统一向量化	中
+LLM幻觉问题	加入系统提示 + 引用来源标注	中
+10. 部署方案 (Docker Compose)
+yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: knowledge_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/knowledge_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./uploads:/app/uploads
+      - ./chroma_db:/app/chroma_db
+
+  celery_worker:
+    build: .
+    command: celery -A celery_worker worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/knowledge_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./uploads:/app/uploads
+      - ./chroma_db:/app/chroma_db
+
+  frontend:
+    build: ../frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+11. 验收标准
+□ 用户能成功注册/登录并获取JWT
+□ 上传PDF后，30秒内完成解析并生成向量 (10页以内)
+□ 针对上传文档提问，回答内容与文档相关 (人工评估)
+□ 流式输出时，前端逐字显示且无明显卡顿
+□ 音频上传后能转文字并支持问答
+□ 所有接口通过Postman测试
+□ Docker-compose一键启动全部服务
+12. 提供给AI的编码指令示例
+请根据以上设计文档，生成以下文件的完整代码：
+
+app/main.py - FastAPI应用入口，包含CORS配置和路由注册
+
+app/models/file.py - 文件表的SQLAlchemy模型
+
+app/api/files.py - 文件上传接口，包含异步任务触发
+
+app/tasks/file_processor.py - Celery任务，实现PDF解析和向量化
+
+app/services/rag_service.py - RAG问答服务，包含检索和LLM调用
+
+app/api/chat.py - 流式问答接口 (SSE)
+
+请使用Python 3.11+，FastAPI 0.104+，LangChain 0.1+，并确保代码包含完整的类型注解和错误处理。
+

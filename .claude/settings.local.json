@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker --version)",
+      "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(py --version)",
+      "Bash(py -3 --version)",
+      "Bash(where python *)",
+      "Bash(docker compose *)",
+      "Bash(C:/Users/雪/AppData/Local/Microsoft/WindowsApps/python.exe --version)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(.venv/Scripts/python.exe scripts/smoke_test.py)",
+      "Bash(PYTHONUTF8=1 PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe scripts/smoke_test.py)",
+      "Bash(PYTHONUTF8=1 .venv/Scripts/python.exe -c ' *)"
+    ]
+  }
+}

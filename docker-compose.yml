@@ -1,0 +1,89 @@
+version: "3.8"
+
+# 一键启动: cp .env.example .env && docker compose up -d --build
+# 前端: http://localhost:3000  后端 API: http://localhost:8000  Swagger: http://localhost:8000/docs
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: kb-postgres
+    environment:
+      POSTGRES_DB: knowledge_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d knowledge_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: kb-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    image: kb-rag-backend:latest
+    container_name: kb-backend
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://user:password@postgres:5432/knowledge_db
+      REDIS_URL: redis://redis:6379/0
+      CHROMA_PERSIST_DIR: /app/chroma_db
+      UPLOAD_DIR: /app/uploads
+      USE_CELERY: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/chroma_db:/app/chroma_db
+
+  celery_worker:
+    # 与 backend 复用同一份镜像，仅启动命令不同 (省一份镜像体积)
+    image: kb-rag-backend:latest
+    container_name: kb-celery
+    command: celery -A celery_worker worker --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://user:password@postgres:5432/knowledge_db
+      REDIS_URL: redis://redis:6379/0
+      CHROMA_PERSIST_DIR: /app/chroma_db
+      UPLOAD_DIR: /app/uploads
+      USE_CELERY: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/chroma_db:/app/chroma_db
+
+  frontend:
+    build: ./frontend
+    container_name: kb-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # 构建期会读取到该值，打包进客户端 bundle
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

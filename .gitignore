@@ -1,0 +1,33 @@
+# 环境变量 (含密钥)
+.env
+backend/.env
+frontend/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# 运行时数据
+backend/uploads/
+backend/chroma_db/
+backend/*.db
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log

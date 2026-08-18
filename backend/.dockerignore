@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+uploads/
+chroma_db/
+*.db
+.pytest_cache/
+.mypy_cache/
+.git/
+.gitignore
+Dockerfile
+.dockerignore
