@@ -31,3 +31,6 @@ Thumbs.db
 
 # Docker
 *.log
+
+# Claude Code 本地配置
+.claude/

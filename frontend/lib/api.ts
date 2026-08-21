@@ -1,9 +1,11 @@
 import axios from "axios";
 import { TOKEN_KEY } from "@/store/authStore";
 
-// 浏览器访问后端的地址。Docker 部署时前端容器内通过浏览器直接访问宿主机端口。
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+// 浏览器访问后端的地址。
+// - 本地开发: 不设置时默认连 http://localhost:8000
+// - Docker 生产(经反代): 构建时传 NEXT_PUBLIC_API_BASE_URL=""，走同源，由 Nginx 转发 /api
+const _configured = process.env.NEXT_PUBLIC_API_BASE_URL;
+export const API_BASE_URL = _configured === "" ? "" : _configured || "http://localhost:8000";
 
 export const api = axios.create({
   baseURL: `${API_BASE_URL}/api`,

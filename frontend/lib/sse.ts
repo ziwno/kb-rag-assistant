@@ -23,7 +23,9 @@ export async function streamChat(
   token: string | null,
   handlers: StreamHandlers
 ): Promise<void> {
-  const url = new URL(`${API_BASE_URL}/api/chat/stream`);
+  // 同源模式 (API_BASE_URL="") 时直接用相对路径，由反向代理转发
+  const path = "/api/chat/stream";
+  const url = new URL(API_BASE_URL ? `${API_BASE_URL}${path}` : path, window.location.origin);
   url.searchParams.set("question", question);
   if (fileIds.length) url.searchParams.set("file_ids", fileIds.join(","));
 

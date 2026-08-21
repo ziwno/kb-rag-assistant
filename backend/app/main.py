@@ -30,14 +30,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 前端开发服务器 (Next.js) 跨域
+# 跨域: 公网部署放开所有来源 (认证走 Bearer token，不依赖 cookie 凭证)。
+# 若需收紧，可改为具体的 cpolar 域名白名单。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
